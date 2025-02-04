@@ -41,7 +41,9 @@ use {
     core::str::{from_utf8, FromStr},
     rand::RngCore,
     static_cell::StaticCell,
-    defmt::*,
+    defmt::{unwrap, info},
+    heapless::String,
+    core::fmt::Write as CoreWrite,
     {defmt_rtt as _, panic_probe as _},
 };
 
@@ -49,6 +51,8 @@ const WIFI_NETWORK: &str = env!("WIFI_NETWORK");
 const WIFI_PASSWORD: &str = env!("WIFI_PASSWORD");
 const CLIENT_NAME: &str = "Pico-W";
 const TCP_PORT: u16 = 80;
+const BUFF_SIZE: usize = 8192;
+const HTML_BYTES: &[u8] = include_bytes!("html/index.html");
 
 const CYW43_JOIN_ERROR: [&str; 16] = [
     "Success", 
@@ -175,13 +179,14 @@ async fn main(spawner: Spawner) {
         None => log::warn!("Unable to Get the Adrress")
     }
 
-    let mut rx_buffer = [0; 4096];
-    let mut tx_buffer = [0; 4096];
-    let mut buf = [0; 4096];
+    let mut rx_buffer = [0; BUFF_SIZE];
+    let mut tx_buffer = [0; BUFF_SIZE];
+    let mut buf = [0; BUFF_SIZE];
+    let html_str = from_utf8(HTML_BYTES).unwrap();
 
     loop {
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
-        socket.set_timeout(Some(Duration::from_secs(180)));
+        socket.set_timeout(Some(Duration::from_secs(10)));
 
         if let Err(e) = socket.accept(TCP_PORT).await {
             log::warn!("Accept Error: {:?}", e);
@@ -191,40 +196,44 @@ async fn main(spawner: Spawner) {
         log::info!("Received Connection from {:?}", socket.remote_endpoint());
         
         loop {
-            let n = match socket.read(&mut buf).await {
+            match socket.read(&mut buf).await {
                 Ok(0) => {
                     log::info!("Connection closed by client");
                     break;
                 }
                 Ok(n) => {
-                    let request = core::str::from_utf8(&buf[..n]).unwrap();
+                    let request = from_utf8(&buf[..n]).unwrap();
 
                     if request.starts_with("GET /led/on") {
                         control.gpio_set(0, true).await; // Turn on the LED
-                    } else if request.starts_with("GET /led/off") {
+                    } 
+                    else if request.starts_with("GET /led/off") {
                         control.gpio_set(0, false).await; // Turn off the LED
                     }
 
-                    let response = b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 158\r\n\r\n\
-                    <html><body>\
-                    <h1>LED Control</h1>\
-                    <button onclick=\"window.location.href='/led/on'\">Turn On</button>\
-                    <button onclick=\"window.location.href='/led/off'\">Turn Off</button>\
-                    </body></html>";
-
-                    match socket.write_all(response).await {
-                        Ok(()) => {}
-                        Err(e) => {
-                            log::warn!("Write Error: {:?}", e);
+                    let mut response = String::<BUFF_SIZE>::new();
+                    
+                    match write!(&mut response,
+                                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
+                                HTML_BYTES.len(),
+                                html_str) 
+                    {
+                        Ok(_) => {
+                            if let Err(e) = socket.write_all(response.as_bytes()).await {
+                                log::warn!("Write Error: {:?}", e);
+                                break;
+                            }
+                        }
+                        Err(_) => {
+                            log::error!("Response buffer overflow: Buffer is too small");
                             break;
                         }
-                    };
+                    }
                 }
                 Err(e) => {
                     log::warn!("Read Error: {:?}", e);
                     break;
                 }
-                _ => {}
             };
         }
     }
