@@ -1,1 +1,1 @@
-# pico-server
+# rp2040-http-server
