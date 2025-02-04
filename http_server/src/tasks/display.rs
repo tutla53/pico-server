@@ -1,6 +1,8 @@
 /*
     OLED Display Task
 */
+#![allow(unused_imports)]
+#![allow(dead_code)]
 
 use {
     embassy_rp::i2c::{

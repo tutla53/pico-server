@@ -3,6 +3,9 @@
     - Commanded Angle will be sent from the TCP at the Main Task
 */
 
+#![allow(unused_imports)]
+#![allow(dead_code)]
+
 use {
     core::time::Duration,
     rp2040_servo_pio::ServoPioBuilder,
