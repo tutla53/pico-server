@@ -213,17 +213,18 @@ async fn main(spawner: Spawner) {
                 Ok(n) => {
                     let request = from_utf8(&buf[..n]).unwrap();
                     let mut processed_html = String::<BUFF_SIZE>::new();
+                    write!(&mut processed_html, "{}", html_str).unwrap();
 
                     // Handle button request
                     if request.starts_with("GET /led") {
                         let mut button_label = from_utf8(b"ON").unwrap();
 
                         led_toggle_status = !led_toggle_status;
-                        control.gpio_set(0, led_toggle_status).await; // Turn on the LED
+                        control.gpio_set(0, led_toggle_status).await;
 
                         if led_toggle_status { button_label = from_utf8(b"OFF").unwrap(); }   
                         
-                        processed_html = process_ssi(html_str, SSI_LED_TAG, button_label);
+                        processed_html = process_ssi(processed_html.as_str(), SSI_LED_TAG, button_label);
 
                     } 
 
