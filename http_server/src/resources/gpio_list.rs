@@ -8,6 +8,7 @@ use {
         pio::InterruptHandler as PioInterruptHandler,
         usb::InterruptHandler as UsbInterruptHandler,
         i2c::InterruptHandler as I2cInterruptHandler,
+        adc::InterruptHandler as AdcInterruptHandler, 
     },
 };
 
@@ -39,5 +40,6 @@ bind_interrupts!(pub struct Irqs {
     PIO0_IRQ_0 => PioInterruptHandler<peripherals::PIO0>;
     PIO1_IRQ_0 => PioInterruptHandler<peripherals::PIO1>;
     USBCTRL_IRQ => UsbInterruptHandler<peripherals::USB>;
+    ADC_IRQ_FIFO => AdcInterruptHandler;
 });
 
