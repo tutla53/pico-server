@@ -35,6 +35,7 @@ use {
         peripherals::{DMA_CH0, PIO0, USB},
         pio::Pio,
         usb::Driver as UsbDriver,
+        adc::{Adc, Channel, Config as AdcConfig},
     },
 
     embedded_io_async::Write,
@@ -44,6 +45,7 @@ use {
     defmt::{unwrap, info},
     heapless::String,
     core::fmt::Write as CoreWrite,
+    embassy_sync::mutex::Mutex,
     {defmt_rtt as _, panic_probe as _},
 };
 
@@ -53,6 +55,8 @@ const CLIENT_NAME: &str = "Pico-W";
 const TCP_PORT: u16 = 80;
 const BUFF_SIZE: usize = 8192;
 const HTML_BYTES: &[u8] = include_bytes!("html/index.html");
+const SSI_TEMP_TAG: &str = "<!--#TEMP-->";
+const SSI_LED_TAG: &str = "<!--#LED-->";
 
 const CYW43_JOIN_ERROR: [&str; 16] = [
     "Success", 
@@ -94,7 +98,10 @@ async fn main(spawner: Spawner) {
     let usb_driver = UsbDriver::new(ph.USB, Irqs);
     let r = split_resources!(ph);
     let p = r.network_resources;
-    let mut led_toggle = true;
+    let mut led_toggle_status = true;
+
+    let mut adc = Adc::new(ph.ADC, Irqs, AdcConfig::default());
+    let mut ts = Channel::new_temp_sensor(ph.ADC_TEMP_SENSOR);
     
     unwrap!(spawner.spawn(logger_task(usb_driver)));
 
@@ -155,8 +162,8 @@ async fn main(spawner: Spawner) {
             Err(err) => {
                 if err.status<16 {
                     let error_code = err.status as usize;
-                    control.gpio_set(0, led_toggle).await;
-                    led_toggle = !led_toggle;
+                    control.gpio_set(0, led_toggle_status).await;
+                    led_toggle_status = !led_toggle_status;
                     log::info!("Join failed with error = {}", CYW43_JOIN_ERROR[error_code]);
                 }
             }
@@ -184,6 +191,8 @@ async fn main(spawner: Spawner) {
     let mut buf = [0; BUFF_SIZE];
     let html_str = from_utf8(HTML_BYTES).unwrap();
 
+    led_toggle_status = false;
+
     loop {
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
         socket.set_timeout(Some(Duration::from_secs(10)));
@@ -203,20 +212,36 @@ async fn main(spawner: Spawner) {
                 }
                 Ok(n) => {
                     let request = from_utf8(&buf[..n]).unwrap();
+                    let mut processed_html = String::<BUFF_SIZE>::new();
 
-                    if request.starts_with("GET /led/on") {
-                        control.gpio_set(0, true).await; // Turn on the LED
+                    // Handle button request
+                    if request.starts_with("GET /led") {
+                        let mut button_label = from_utf8(b"ON").unwrap();
+
+                        led_toggle_status = !led_toggle_status;
+                        control.gpio_set(0, led_toggle_status).await; // Turn on the LED
+
+                        if led_toggle_status { button_label = from_utf8(b"OFF").unwrap(); }   
+                        
+                        processed_html = process_ssi(html_str, SSI_LED_TAG, button_label);
+
                     } 
-                    else if request.starts_with("GET /led/off") {
-                        control.gpio_set(0, false).await; // Turn off the LED
-                    }
 
+                    let raw_temp = adc.read(&mut ts).await.unwrap();
+                    let temp_c = convert_to_celsius(raw_temp);
+                    let mut temp_str = String::<32>::new();
+                    write!(&mut temp_str, "{:.1}", temp_c).unwrap();
+
+                    // Process SSI template
+                    processed_html = process_ssi(processed_html.as_str(), SSI_TEMP_TAG, temp_str.as_str());
+
+                    // Build HTTP response
                     let mut response = String::<BUFF_SIZE>::new();
                     
                     match write!(&mut response,
                                 "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
-                                HTML_BYTES.len(),
-                                html_str) 
+                                processed_html.len(),
+                                processed_html) 
                     {
                         Ok(_) => {
                             if let Err(e) = socket.write_all(response.as_bytes()).await {
@@ -237,4 +262,34 @@ async fn main(spawner: Spawner) {
             };
         }
     }
+}
+
+fn process_ssi(html_file: &str, ssi_tag: &str, value: &str) -> String<BUFF_SIZE>{
+    let mut processed_html = String::<BUFF_SIZE>::new();
+    
+    for line in html_file.lines() {
+        // Replace SSI tag with actual value
+
+        if let Some(pos) = line.find(ssi_tag) {
+            // Split line into parts before and after the tag
+            let before = &line[..pos];
+            let after = &line[pos + ssi_tag.len()..];
+            
+            // Write the reconstructed line
+            write!(&mut processed_html, "{}{}{}\r\n", before, value, after).unwrap();
+        } else {
+            write!(&mut processed_html, "{}\r\n", line).unwrap();
+        }
+    }
+
+    return processed_html;
+}
+
+fn convert_to_celsius(raw_temp: u16) -> f32 {
+    // According to chapter 4.9.5. Temperature Sensor in RP2040 datasheet
+    let temp = 27.0 - (raw_temp as f32 * 3.3 / 4096.0 - 0.706) / 0.001721;
+    let sign = if temp < 0.0 { -1.0 } else { 1.0 };
+    let rounded_temp_x10: i16 = ((temp * 10.0) + 0.5 * sign) as i16;
+    
+    return (rounded_temp_x10 as f32) / 10.0;
 }
