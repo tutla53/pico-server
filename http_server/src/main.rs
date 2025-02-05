@@ -13,9 +13,8 @@ use {
     crate::resources::gpio_list::{
         Irqs, 
         AssignedResources, 
-        ServoPioResources, 
         NetworkResources,
-        DisplayResources,
+        AdcResources,
     },
 
     cyw43::JoinOptions,
@@ -99,8 +98,8 @@ async fn main(spawner: Spawner) {
     let p = r.network_resources;
     let mut led_toggle_status = true;
 
-    let mut adc = Adc::new(ph.ADC, Irqs, AdcConfig::default());
-    let mut ts = Channel::new_temp_sensor(ph.ADC_TEMP_SENSOR);
+    let mut adc = Adc::new(r.adc_resources.ADC_PERIPHERAL, Irqs, AdcConfig::default());
+    let mut ts = Channel::new_temp_sensor(r.adc_resources.ADC_TEMP_PIN);
     
     unwrap!(spawner.spawn(logger_task(usb_driver)));
 
