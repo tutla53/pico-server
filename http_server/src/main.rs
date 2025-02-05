@@ -1,5 +1,6 @@
-/*  Wireless 2 DOF Camera Monitor
-    - Controlling 2 Servo Motor via TCP Server
+/*  Wireless Webserver Template
+    - Controlling 1 LED
+    - Show Internal Temperature Value
 */
 
 #![no_std]
