@@ -45,7 +45,6 @@ use {
     defmt::{unwrap, info},
     heapless::String,
     core::fmt::Write as CoreWrite,
-    embassy_sync::mutex::Mutex,
     {defmt_rtt as _, panic_probe as _},
 };
 
@@ -204,6 +203,7 @@ async fn main(spawner: Spawner) {
 
         log::info!("Received Connection from {:?}", socket.remote_endpoint());
         
+        // Currently only accept 1 connection at a time
         loop {
             match socket.read(&mut buf).await {
                 Ok(0) => {
